@@ -6,7 +6,7 @@ const { MaxUint256, keccak256, toUtf8Bytes, solidityPacked, Wallet, toBeHex, get
 describe("BETERC20", function () {
     let Token, token;
     let owner, addr1, addr2, otherAccounts;
-    let ownerWallet, addr1Wallet, add2Wallet;
+    let ownerWallet, addr1Wallet, addr2Wallet;
 
     beforeEach(async function () {
         [owner, addr1, addr2, ...otherAccounts] = await ethers.getSigners();
@@ -243,7 +243,7 @@ describe("BETERC20", function () {
                 chainId
             );
 
-            const flatSignature = await ownerWallet.signMessage(getBytes(digest));
+            const flatSignature = await addr2Wallet.signMessage(getBytes(digest));
             const { v, r, s } = ethers.Signature.from(flatSignature);
 
             await expect(

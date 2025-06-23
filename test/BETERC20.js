@@ -1,23 +1,13 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const defaultAbiCoder = new ethers.AbiCoder();
-const { MaxUint256, keccak256, toUtf8Bytes, solidityPacked, Wallet, toBeHex, getBytes } = ethers;
+const { MaxUint256 } = ethers;
 
 describe("BETERC20", function () {
     let Token, token;
-    let owner, addr1, addr2, otherAccounts;
-    let ownerWallet, addr1Wallet, addr2Wallet;
+    let owner, spender, addr1, addr2, otherAccounts;
 
     beforeEach(async function () {
-        [owner, addr1, addr2, ...otherAccounts] = await ethers.getSigners();
-        const ownerPrivateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-        const addr1PrivateKey = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
-        const addr2PrivateKey = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
-
-        ownerWallet = new Wallet(ownerPrivateKey, ethers.provider);
-        addr1Wallet = new Wallet(addr1PrivateKey, ethers.provider);
-        addr2Wallet = new Wallet(addr2PrivateKey, ethers.provider);
-
+        [owner, spender, addr1, addr2, ...otherAccounts] = await ethers.getSigners();
         Token = await ethers.getContractFactory("TestBETERC20");
         token = await Token.deploy();
     });
@@ -107,153 +97,136 @@ describe("BETERC20", function () {
     });
 
     describe("EIP-2612 Permit", function () {
-        let chainId;
-        beforeEach(async function () {
-            chainId = (await ethers.provider.getNetwork()).chainId;
-            await token.mint(owner.address, 1000);
-        });
-
-        function getPermitDigest(
-            name, tokenAddress, owner, spender, value, nonce, deadline, chainId
-        ) {
-            const DOMAIN_SEPARATOR = keccak256(
-                defaultAbiCoder.encode(
-                    ["bytes32", "bytes32", "bytes32", "uint256", "address"],
-                    [
-                        keccak256(toUtf8Bytes("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")),
-                        keccak256(toUtf8Bytes(name)),
-                        keccak256(toUtf8Bytes("1")),
-                        chainId,
-                        tokenAddress
-                    ]
-                )
-            );
-            const PERMIT_TYPEHASH = keccak256(
-                toUtf8Bytes("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
-            );
-            return keccak256(
-                solidityPacked(
-                    ["string", "bytes32", "bytes32"],
-                    [
-                        "\x19\x01",
-                        DOMAIN_SEPARATOR,
-                        keccak256(
-                            defaultAbiCoder.encode(
-                                ["bytes32", "address", "address", "uint256", "uint256", "uint256"],
-                                [PERMIT_TYPEHASH, owner, spender, value, nonce, deadline]
-                            )
-                        )
-                    ]
-                )
-            );
-        }
-/*
         it("should set allowance via permit", async function () {
-            const value = 123;
+            const name = await token.name();
+            const version = "1";
+            const chainId = (await ethers.provider.getNetwork()).chainId;
             const nonce = await token.nonces(owner.address);
-            const deadline = Math.floor(Date.now() / 1000) + 3600;
-            // console.log("token:", token?.target);
-            // console.log("Owner:", owner?.address);
-            // console.log("Addr1:", addr1?.address);
-            // console.log("Value:", value);
-            // console.log("Nonce", nonce);
-            // console.log("Deadline", deadline);
-            // console.log("ChainId:", chainId);
-            // console.log("token:", token);
+            const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+            const value = 123n;
 
-            const digest = getPermitDigest(
-                "Bulipe Exchang Token",
-                token.target,
-                owner.address,
-                addr1.address,
-                value,
-                nonce,
-                deadline,
-                chainId
-            );
+            const domain = {
+                name,
+                version,
+                chainId,
+                verifyingContract: await token.getAddress(),
+            };
 
-            // const signingKey = new ethers.utils.SigningKey(owner._signingKey().privateKey);
-            // const signature = signingKey.signDigest(digest);
-            // const { v, r, s } = ethers.utils.splitSignature(signature);
-            // const ownerPrivateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"; // for owner
-            // Use wallet directly with the private key
-            // const wallet = new Wallet(ownerPrivateKey); // owner
-            const flatSignature = await ownerWallet.signMessage(getBytes(digest));
-            const { v, r, s } = ethers.Signature.from(flatSignature);
+            const types = {
+                Permit: [
+                    { name: "owner", type: "address" },
+                    { name: "spender", type: "address" },
+                    { name: "value", type: "uint256" },
+                    { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" },
+                ],
+            };
+
+            const message = {
+                owner: owner.address,
+                spender: spender.address,
+                value: value,
+                nonce: nonce,
+                deadline: deadline,
+            };
+
+            const signature = await owner.signTypedData(domain, types, message);
+            const { v, r, s } = ethers.Signature.from(signature);
 
             await expect(
-                token.permit(
-                    owner.address,
-                    addr1.address,
-                    value,
-                    deadline,
-                    v, r, s
-                )
-            ).to.emit(token, "Approval").withArgs(owner.address, addr1.address, value);
+                token.permit(owner.address, spender.address, value, deadline, v, r, s)
+            )
+            .to.emit(token, "Approval")
+            .withArgs(owner.address, spender.address, value);
 
-            expect(await token.allowance(owner.address, addr1.address)).to.equal(value);
+            const allowance = await token.allowance(owner.address, spender.address);
+            expect(allowance).to.equal(value);
 
-            expect(await token.nonces(owner.address)).to.equal(nonce.add(1));
+            const newNonce = await token.nonces(owner.address);
+            expect(newNonce).to.equal(nonce + 1n);
         });
-*/
 
         it("should fail with expired permit", async function () {
-            const value = 123;
+            const name = await token.name();
+            const version = "1";
+            const chainId = (await ethers.provider.getNetwork()).chainId;
             const nonce = await token.nonces(owner.address);
-            const deadline = Math.floor(Date.now() / 1000) - 100;
+            const deadline = BigInt(Math.floor(Date.now() / 1000) - 1);
+            const value = 123n;
 
-            const digest = getPermitDigest(
-                "Bulipe Exchang Token",
-                token.target,
-                owner.address,
-                addr1.address,
-                value,
-                nonce,
-                deadline,
-                chainId
-            );
+            const domain = {
+                name,
+                version,
+                chainId,
+                verifyingContract: await token.getAddress(),
+            };
 
-            const flatSignature = await ownerWallet.signMessage(getBytes(digest));
-            const { v, r, s } = ethers.Signature.from(flatSignature);
+            const types = {
+                Permit: [
+                    { name: "owner", type: "address" },
+                    { name: "spender", type: "address" },
+                    { name: "value", type: "uint256" },
+                    { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" },
+                ],
+            };
+
+            const message = {
+                owner: owner.address,
+                spender: spender.address,
+                value: value,
+                nonce: nonce,
+                deadline: deadline,
+            };
+
+            const signature = await owner.signTypedData(domain, types, message);
+            const { v, r, s } = ethers.Signature.from(signature);
 
             await expect(
-                token.permit(
-                    owner.address,
-                    addr1.address,
-                    value,
-                    deadline,
-                    v, r, s
-                )
+                token.permit(owner.address, spender.address, value, deadline, v, r, s)
             ).to.be.revertedWith("Bulipe: EXPIRED");
         });
 
         it("should fail on invalid signature", async function () {
-            const value = 123;
+            const name = await token.name();
+            const version = "1";
+            const chainId = (await ethers.provider.getNetwork()).chainId;
             const nonce = await token.nonces(owner.address);
-            const deadline = Math.floor(Date.now() / 1000) + 3600;
+            const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+            const value = 123n;
 
-            const digest = getPermitDigest(
-                "Bulipe Exchang Token",
-                token.target,
-                owner.address,
-                addr1.address,
-                value,
-                nonce,
-                deadline,
-                chainId
-            );
+            const domain = {
+                name,
+                version,
+                chainId,
+                verifyingContract: await token.getAddress(),
+            };
 
-            const flatSignature = await addr2Wallet.signMessage(getBytes(digest));
-            const { v, r, s } = ethers.Signature.from(flatSignature);
+            const types = {
+                Permit: [
+                    { name: "owner", type: "address" },
+                    { name: "spender", type: "address" },
+                    { name: "value", type: "uint256" },
+                    { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" },
+                ],
+            };
+
+            const message = {
+                owner: owner.address,
+                spender: spender.address,
+                value: value,
+                nonce: nonce,
+                deadline: deadline,
+            };
+
+            const signature = await owner.signTypedData(domain, types, message);
+            const { v, r, s } = ethers.Signature.from(signature);
+
+            await token.permit(owner.address, spender.address, value, deadline, v, r, s);
 
             await expect(
-                token.permit(
-                    owner.address,
-                    addr1.address,
-                    value,
-                    deadline,
-                    v, r, s
-                )
+                token.permit(owner.address, spender.address, value, deadline, v, r, s)
             ).to.be.revertedWith("Bulipe: INVALID_SIGNATURE");
         });
     });

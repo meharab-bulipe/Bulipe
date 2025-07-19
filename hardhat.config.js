@@ -3,6 +3,12 @@ require('dotenv').config();
 
 module.exports = {
   solidity: "0.8.24",
+  settings: {
+    optimizer: {
+      enabled: true,
+      runs: 50, // Lower for smaller size; higher for runtime efficiency
+    },
+  },
   networks: {
     hardhat: {},
     sepolia: {
